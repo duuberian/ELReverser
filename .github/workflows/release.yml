@@ -1,0 +1,46 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release-unsigned.apk ../ELReverser.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ELReverser.apk
+          body: |
+            ## EL Reverser ${{ github.ref_name }}
+
+            ### 📱 Android
+            Download **ELReverser.apk** below, open on your Android device, and install.
+
+            ### 🍎 macOS
+            Build from source: `cd macos && swift build && swift run ELReverser`
