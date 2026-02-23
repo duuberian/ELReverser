@@ -13,10 +13,13 @@ An audio reverser and scrambler app. Available for **macOS** and **Android**.
 
 1. Download and open the DMG
 2. Drag **EL Reverser** into **Applications**
-3. Double-click **"Open EL Reverser (First Time)"** — this removes the macOS download block (only needed once)
-4. After that, open EL Reverser from Applications normally
+3. Open **Terminal** and run:
+   ```
+   xattr -cr /Applications/EL\ Reverser.app
+   ```
+4. Open EL Reverser from Applications — it will work from now on
 
-> ℹ️ macOS blocks apps that aren't from the App Store. The included script fixes this with one click.
+> ⚠️ macOS blocks apps not from the App Store. Step 3 removes this block (only needed once).
 
 ## Features
 
