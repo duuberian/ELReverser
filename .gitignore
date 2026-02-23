@@ -11,3 +11,5 @@ macos/.swiftpm/
 
 # macOS
 .DS_Store
+build_dmg/
+*.dmg
