@@ -9,6 +9,15 @@ An audio reverser and scrambler app. Available for **macOS** and **Android**.
 | **🍎 macOS** | Download the DMG from the [latest release](https://github.com/duuberian/ELReverser/releases/latest) |
 | **📱 Android** | Download the APK from the [latest release](https://github.com/duuberian/ELReverser/releases/latest) |
 
+### macOS Installation
+
+1. Download and open the DMG
+2. Drag **EL Reverser** into **Applications**
+3. Double-click **"Open EL Reverser (First Time)"** — this removes the macOS download block (only needed once)
+4. After that, open EL Reverser from Applications normally
+
+> ℹ️ macOS blocks apps that aren't from the App Store. The included script fixes this with one click.
+
 ## Features
 
 - **Record** audio directly from microphone
