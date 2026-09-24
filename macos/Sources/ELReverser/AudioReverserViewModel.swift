@@ -111,6 +111,21 @@ struct AudioItem: Identifiable {
         }
         return name
     }
+
+    func suggestedFileBaseName(rootName: String) -> String {
+        let root = URL(fileURLWithPath: rootName).deletingPathExtension().lastPathComponent
+        let suffix: String
+        if isDecoded { suffix = "decoded" }
+        else if let last = steps.last {
+            switch last {
+            case .reverse: suffix = "reversed"
+            case .chunkedReverse(let size): suffix = "chunk-reverse-\(String(format: "%.2g", size))s"
+            }
+        } else {
+            suffix = "audio"
+        }
+        return "\(root)-\(suffix)"
+    }
 }
 
 struct ReverseOptions {
@@ -129,7 +144,9 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
     @Published var recordingTime: TimeInterval = 0
     @Published var playingItemID: UUID?
     @Published var expandedItemID: UUID?
+    @Published var selectedItemID: UUID?
     @Published var sourceWaveformCache: [String: [Float]] = [:]
+    @Published var errorMessage: String?
 
     /// Compute the nesting depth of an item (0 for root, 1 for child, 2 for grandchild, etc.)
     func depth(of item: AudioItem) -> Int {
@@ -150,8 +167,9 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
         }
         return current.name
     }
-    @Published var showDecodeSheet = false
-    @Published var decodeTargetItemID: UUID?
+    var selectedItem: AudioItem? {
+        items.first { $0.id == selectedItemID }
+    }
 
     private var recorder: AVAudioRecorder?
     private var player: AVAudioPlayer?
@@ -209,7 +227,10 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
     func startRecording() {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             Task { @MainActor in
-                guard granted else { return }
+                guard granted else {
+                    self.errorMessage = "Microphone access is required to record audio."
+                    return
+                }
                 let tempURL = FileManager.default.temporaryDirectory
                     .appendingPathComponent("recording-\(UUID().uuidString).m4a")
                 let settings: [String: Any] = [
@@ -229,7 +250,9 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
                             self.recordingTime += 0.1
                         }
                     }
-                } catch {}
+                } catch {
+                    self.errorMessage = "Could not start recording.\n\(error.localizedDescription)"
+                }
             }
         }
     }
@@ -413,7 +436,7 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
                         withAnimation(.easeOut(duration: 0.2)) {
                             self.items[idx] = AudioItem(
                                 id: placeholderID,
-                                name: "Reversed",
+                                name: newStep.displayName,
                                 url: tempOutput, duration: dur,
                                 isReversed: true, isLoading: false,
                                 parentID: item.id,
@@ -426,6 +449,7 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
             } catch {
                 DispatchQueue.main.async {
                     withAnimation { self.items.removeAll { $0.id == placeholderID } }
+                    self.errorMessage = "Scramble failed.\n\(error.localizedDescription)"
                 }
             }
         }
@@ -434,13 +458,11 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
     // MARK: - Decode (unscramble)
 
     func decode(item: AudioItem, code: String) {
-        print("[Decode] code='\(code)'")
         guard let steps = ScrambleCode.decode(code: code) else {
-            print("[Decode] Failed to parse code")
+            errorMessage = "That decode code isn’t valid. Codes look like SCR1:R-C0.5-R."
             return
         }
         let inverseSteps = ScrambleCode.inverseSteps(of: steps)
-        print("[Decode] steps=\(steps.map { $0.token }), inverse=\(inverseSteps.map { $0.token })")
 
         let placeholderID = UUID()
         let placeholder = AudioItem(
@@ -471,7 +493,6 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
         let tempOutput = FileManager.default.temporaryDirectory
             .appendingPathComponent("decoded-\(UUID().uuidString).wav")
 
-        print("[Decode] inputURL=\(inputURL.path), outputURL=\(tempOutput.path)")
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 // Convert input to WAV first if needed (handles m4a, mp3, etc.)
@@ -484,8 +505,7 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
                 }
                 try AudioEngine.applySteps(inputURL: processURL, outputURL: tempOutput, steps: inverseSteps)
                 let dur = Self.audioDuration(url: tempOutput)
-                print("[Decode] Success! duration=\(dur)")
-                DispatchQueue.main.async {
+                        DispatchQueue.main.async {
                     if let idx = self.items.firstIndex(where: { $0.id == placeholderID }) {
                         withAnimation(.easeOut(duration: 0.2)) {
                             self.items[idx] = AudioItem(
@@ -501,9 +521,9 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
                     }
                 }
             } catch {
-                print("[Decode] ERROR: \(error)")
                 DispatchQueue.main.async {
                     withAnimation { self.items.removeAll { $0.id == placeholderID } }
+                    self.errorMessage = "Decode failed.\n\(error.localizedDescription)"
                 }
             }
         }
@@ -548,12 +568,14 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = ext == "wav" ? [.wav] : [.audio]
         savePanel.canCreateDirectories = true
-        savePanel.nameFieldStringValue = item.name.hasSuffix(".\(ext)") ? item.name : "\(item.name).\(ext)"
+        savePanel.nameFieldStringValue = "\(item.suggestedFileBaseName(rootName: rootName(of: item))).\(ext)"
         guard savePanel.runModal() == .OK, let outputURL = savePanel.url else { return }
         do {
             if FileManager.default.fileExists(atPath: outputURL.path) { try FileManager.default.removeItem(at: outputURL) }
             try FileManager.default.copyItem(at: item.url, to: outputURL)
-        } catch {}
+        } catch {
+            errorMessage = "Could not save audio.\n\(error.localizedDescription)"
+        }
     }
 
     // MARK: - Convert to WAV
@@ -577,9 +599,27 @@ final class AudioReverserViewModel: NSObject, ObservableObject, AVAudioPlayerDel
     // MARK: - Delete
 
     func delete(item: AudioItem) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            items.removeAll { $0.id == item.id || $0.parentID == item.id }
+        var doomed = Set([item.id])
+        var changed = true
+        while changed {
+            changed = false
+            for candidate in items where !doomed.contains(candidate.id) {
+                if let parentID = candidate.parentID, doomed.contains(parentID) {
+                    doomed.insert(candidate.id)
+                    changed = true
+                }
+            }
         }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            items.removeAll { doomed.contains($0.id) }
+            if doomed.contains(selectedItemID ?? UUID()) { selectedItemID = nil }
+            if doomed.contains(expandedItemID ?? UUID()) { expandedItemID = nil }
+        }
+    }
+
+    func clearError() {
+        errorMessage = nil
     }
 
     var formattedRecordingTime: String {
